@@ -11,9 +11,10 @@ from typing import Dict, List, Tuple
 from rich.console import Console
 from rich.progress import Progress
 
-from core.vault_reader import VaultReader
-from core.graph_builder import GraphBuilder
-from services.embedding_service import EmbeddingService
+from core.vault import VaultReader
+from core.graph import GraphBuilder
+from services.embedding import EmbeddingService
+from services.vectorstore import VectorStoreClient
 
 console = Console()
 
@@ -46,7 +47,7 @@ class ObsidianAnalyzer:
             # Store content and links
             vault_data[str(file)] = {
                 "content": content,
-                "links": target_links
+                "links": list(target_links)  # Convert set to list
             }
             
         return vault_data
@@ -79,11 +80,17 @@ def process_with_embeddings(
         model_name: Name of the model to use
         batch_size: Number of texts to process in each batch
     """
-    console.print("[bold blue]Initializing embedding service...[/]")
-    service = EmbeddingService(
+    console.print("[bold blue]Initializing services...[/]")
+    embedding_service = EmbeddingService(
         model_type=model_type,
         model_name=model_name,
         batch_size=batch_size
+    )
+    
+    similarity_service = SimilaritySearchService(
+        embedding_service=embedding_service,
+        collection_name="embeddings",  # Use same collection name as before
+        persist_directory=Path(output_path).parent / "embeddings"  # Use same directory structure
     )
     
     # Get all notes
@@ -93,7 +100,6 @@ def process_with_embeddings(
     console.print(f"[bold green]Processing {total_notes} notes...[/]")
     
     # Process notes in batches
-    embeddings = {}
     with Progress() as progress:
         task = progress.add_task("[cyan]Generating embeddings...", total=total_notes)
         
@@ -105,24 +111,37 @@ def process_with_embeddings(
                 for note in batch
             ]
             
-            batch_embeddings = service.get_embeddings_batch(batch, batch_texts)
-            
-            # Store embeddings
-            for note, embedding in zip(batch, batch_embeddings):
-                embeddings[note] = embedding
+            # Add notes to similarity service
+            for note, text in zip(batch, batch_texts):
+                similarity_service.add_note(
+                    note_id=note,
+                    content=text,
+                    metadata={
+                        "text": text,
+                        "file_path": note,
+                        "links": ", ".join(vault_data[note]["links"]),  # Convert list to comma-separated string
+                        "model": model_name
+                    }
+                )
             
             progress.update(task, advance=len(batch))
     
-    # Save embeddings
-    console.print("[bold blue]Saving embeddings...[/]")
+    # Save embeddings info
+    console.print("[bold blue]Saving embeddings info...[/]")
+    embeddings_info = {
+        "model_type": model_type,
+        "model_name": model_name,
+        "total_notes": total_notes,
+        "model_info": embedding_service.get_model_info()
+    }
+    
     with open(output_path, 'w') as f:
-        json.dump(embeddings, f, indent=2)
-    console.print(f"[bold green]Embeddings saved to {output_path}[/]")
+        json.dump(embeddings_info, f, indent=2)
+    console.print(f"[bold green]Embeddings info saved to {output_path}[/]")
     
     # Print model info
-    model_info = service.get_model_info()
     console.print("\n[bold]Model Information:[/]")
-    for key, value in model_info.items():
+    for key, value in embeddings_info["model_info"].items():
         console.print(f"{key}: {value}")
 
 def main():
@@ -136,7 +155,7 @@ def main():
         "--output",
         type=str,
         default="data/embeddings.json",
-        help="Path to save the embeddings"
+        help="Path to save the embeddings info"
     )
     parser.add_argument(
         "--model-type",

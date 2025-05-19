@@ -1,10 +1,9 @@
 """
-Embedding service for generating and managing text embeddings.
-Uses ChromaDB for persistent storage of embeddings.
+Embedding service for generating text embeddings.
+Supports both local models via Sentence Transformers and OpenAI's embedding models.
 """
 
 import os
-import json
 import hashlib
 import time
 from pathlib import Path
@@ -14,8 +13,6 @@ from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from openai import RateLimitError, APIError
 from dotenv import load_dotenv
-import chromadb
-from chromadb.config import Settings
 import tiktoken
 
 # Load environment variables
@@ -25,14 +22,12 @@ class EmbeddingService:
     """
     Service for generating text embeddings using various models.
     Supports both local models and OpenAI's embedding models.
-    Uses ChromaDB for persistent storage of embeddings.
     """
 
     def __init__(
         self,
         model_type: str = "api",
         model_name: str = "text-embedding-3-small",
-        persist_dir: str = "data/embeddings",
         batch_size: int = 32,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -44,7 +39,6 @@ class EmbeddingService:
         Args:
             model_type: Type of model to use ('local' or 'api')
             model_name: Name of the model to use
-            persist_dir: Directory to persist embeddings
             batch_size: Number of texts to process in each batch
             max_retries: Maximum number of retries for API calls
             retry_delay: Base delay between retries in seconds
@@ -56,20 +50,6 @@ class EmbeddingService:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.max_tokens = max_tokens
-        self.persist_dir = Path(persist_dir)
-        self.persist_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize ChromaDB
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_dir),
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        # Create or get collection
-        self.collection = self.client.get_or_create_collection(
-            name="embeddings",
-            metadata={"model": model_name}
-        )
         
         # Initialize model
         self._initialize_model()
@@ -84,7 +64,7 @@ class EmbeddingService:
             try:
                 self.model = SentenceTransformer(
                     self.model_name,
-                    cache_folder=str(self.persist_dir / "model_cache")
+                    cache_folder=str(Path.home() / ".cache" / "obsidian-agent" / "model_cache")
                 )
             except Exception as e:
                 raise ValueError(
@@ -117,21 +97,6 @@ class EmbeddingService:
             # Retry other API errors with linear backoff
             return attempt < self.max_retries, self.retry_delay
         return False, 0
-
-    def _get_text_hash(self, file_path: str, text: str) -> str:
-        """
-        Generate a unique hash for the text using both file path and content.
-        
-        Args:
-            file_path: Path of the file containing the text
-            text: Text content to hash
-            
-        Returns:
-            Unique hash string
-        """
-        # Combine file path and text for unique hashing
-        combined = f"{file_path}:{text}"
-        return hashlib.md5(combined.encode()).hexdigest()
 
     def _chunk_text(self, text: str) -> List[str]:
         """
@@ -187,12 +152,11 @@ class EmbeddingService:
             return []
         return list(np.mean(embeddings, axis=0))
 
-    def get_embedding(self, file_path: str, text: str) -> List[float]:
+    def get_embedding(self, text: str) -> List[float]:
         """
         Get embedding for a single text.
 
         Args:
-            file_path: Path of the file containing the text
             text: Text to generate embedding for
 
         Returns:
@@ -201,17 +165,6 @@ class EmbeddingService:
         if not text.strip():
             raise ValueError("Input text cannot be empty")
             
-        # Check if embedding exists in ChromaDB
-        text_hash = self._get_text_hash(file_path, text)
-        results = self.collection.get(
-            ids=[text_hash],
-            include=["embeddings", "metadatas"]
-        )
-        
-        # Check if results exist and have embeddings
-        if results and results["ids"] and len(results["embeddings"]) > 0:
-            return results["embeddings"][0]
-        
         # Split text into chunks if needed
         chunks = self._chunk_text(text)
         chunk_embeddings = []
@@ -240,24 +193,13 @@ class EmbeddingService:
                             raise Exception(f"Failed after {self.max_retries} attempts: {str(e)}")
         
         # Average the chunk embeddings
-        result = self._average_embeddings(chunk_embeddings)
-        
-        # Store in ChromaDB
-        self.collection.add(
-            ids=[text_hash],
-            embeddings=[result],
-            metadatas=[{"text": text, "file_path": file_path, "num_chunks": len(chunks)}],
-            documents=[text]
-        )
-        
-        return result
+        return self._average_embeddings(chunk_embeddings)
 
-    def get_embeddings_batch(self, file_paths: List[str], texts: List[str]) -> List[List[float]]:
+    def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
         Get embeddings for a batch of texts.
 
         Args:
-            file_paths: List of file paths
             texts: List of texts to generate embeddings for
 
         Returns:
@@ -266,54 +208,13 @@ class EmbeddingService:
         if not texts:
             return []
             
-        if len(file_paths) != len(texts):
-            raise ValueError("Number of file paths must match number of texts")
-            
-        # Check which texts need new embeddings
-        text_hashes = [self._get_text_hash(fp, text) for fp, text in zip(file_paths, texts)]
-        results = self.collection.get(
-            ids=text_hashes,
-            include=["embeddings", "metadatas"]
-        )
-        
-        # Create mapping of hash to index
-        hash_to_idx = {h: i for i, h in enumerate(text_hashes)}
-        
-        # Initialize results array
-        embeddings = [None] * len(texts)
-        
-        # Fill in existing embeddings
-        if results and results["ids"]:
-            for i, hash_id in enumerate(results["ids"]):
-                if hash_id in hash_to_idx:
-                    embeddings[hash_to_idx[hash_id]] = results["embeddings"][i]
-        
-        # Find texts that need new embeddings
-        texts_to_embed = []
-        indices_to_embed = []
-        file_paths_to_embed = []
-        for i, emb in enumerate(embeddings):
-            if emb is None:
-                texts_to_embed.append(texts[i])
-                indices_to_embed.append(i)
-                file_paths_to_embed.append(file_paths[i])
-        
-        if texts_to_embed:
-            # Process each text individually to handle chunking
-            new_embeddings = []
-            for text, file_path in zip(texts_to_embed, file_paths_to_embed):
-                embedding = self.get_embedding(file_path, text)
-                new_embeddings.append(embedding)
-            
-            # Update results
-            for i, emb in zip(indices_to_embed, new_embeddings):
-                embeddings[i] = emb
+        # Process each text individually to handle chunking
+        embeddings = []
+        for text in texts:
+            embedding = self.get_embedding(text)
+            embeddings.append(embedding)
         
         return embeddings
-
-    def clear_embeddings(self) -> None:
-        """Clear all stored embeddings."""
-        self.collection.delete(where={})
 
     def get_model_info(self) -> Dict[str, Any]:
         """
@@ -347,26 +248,21 @@ class EmbeddingService:
             }
 
 def main():
-    """Test the embedding service with a sample graph."""
+    """Test the embedding service."""
     # Initialize service
     service = EmbeddingService(
         model_type="api",
-        model_name="text-embedding-3-small",
-        persist_dir="data/embeddings"
+        model_name="text-embedding-3-small"
     )
     
-    # Load sample graph
-    with open("data/graph.json", "r") as f:
-        sample_graph = json.load(f)
-    
     # Test single embedding
-    embedding = service.get_embedding("test.md", sample_graph["content"])
+    text = "This is a test sentence for embedding generation."
+    embedding = service.get_embedding(text)
     print(f"Generated embedding of dimension: {len(embedding)}")
     
     # Test batch embedding
-    file_paths = ["test1.md", "test2.md", "test3.md"]
-    texts = [sample_graph["content"]] * 3
-    embeddings = service.get_embeddings_batch(file_paths, texts)
+    texts = [text] * 3
+    embeddings = service.get_embeddings_batch(texts)
     print(f"Generated {len(embeddings)} embeddings in batch")
     
     # Print model info

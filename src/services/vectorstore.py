@@ -10,7 +10,7 @@ import chromadb
 from chromadb.config import Settings
 from datetime import datetime
 
-from .embedding_service import EmbeddingService
+from .embedding import EmbeddingService
 
 
 class VectorStoreClient:
