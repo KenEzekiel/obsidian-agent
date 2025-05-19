@@ -87,7 +87,7 @@ def process_with_embeddings(
         batch_size=batch_size
     )
     
-    similarity_service = SimilaritySearchService(
+    vector_store_client = VectorStoreClient(
         embedding_service=embedding_service,
         collection_name="embeddings",  # Use same collection name as before
         persist_directory=Path(output_path).parent / "embeddings"  # Use same directory structure
@@ -113,7 +113,7 @@ def process_with_embeddings(
             
             # Add notes to similarity service
             for note, text in zip(batch, batch_texts):
-                similarity_service.add_note(
+                vector_store_client.add_note(
                     note_id=note,
                     content=text,
                     metadata={
