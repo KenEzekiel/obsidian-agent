@@ -71,7 +71,26 @@ class VectorStoreClient:
             metadata: Additional metadata about the note
         """
         # Generate embedding
-        embedding = self.embedding_service.get_embedding(content)
+        try:
+            print(f"\n[VectorStore] 🔄 Generating embedding for note: {note_id}")
+            embedding = self.embedding_service.get_embedding(content)
+            
+            
+            # Ensure embedding is in the correct format
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
+            elif not isinstance(embedding, list):
+                raise ValueError(f"Unexpected embedding type: {type(embedding)}")
+                
+            # Validate embedding
+            if not embedding or len(embedding) == 0:
+                raise ValueError("Generated embedding is empty")
+                
+            print(f"[VectorStore] ✅ Generated embedding of length {len(embedding)}")
+            
+        except Exception as e:
+            print(f"[VectorStore] ❌ Error generating embedding: {str(e)}")
+            raise
         
         # Prepare metadata
         note_metadata = {
@@ -89,12 +108,58 @@ class VectorStoreClient:
                 note_metadata[key] = str(value)
         
         # Add to collection
-        self.collection.add(
-            ids=[note_id],
-            embeddings=[embedding],
-            metadatas=[note_metadata],
-            documents=[content]
-        )
+        try:
+            print(f"\n[VectorStore] 🔄 Adding note to collection: {note_id}")
+            
+            # First try to delete if exists
+            try:
+                self.collection.delete(ids=[note_id])
+                print("[VectorStore] ℹ️ Deleted existing note if present")
+            except Exception as e:
+                print(f"[VectorStore] ℹ️ No existing note to delete: {str(e)}")
+                
+            # Add the note with embedding
+            print("[VectorStore] 📥 Adding note with embedding...")
+            
+            self.collection.add(
+                ids=[note_id],
+                embeddings=[embedding],
+                metadatas=[note_metadata],
+                documents=[content]
+            )
+            
+            # Verify the note was added correctly
+            print("[VectorStore] 🔍 Verifying note addition...")
+            result = self.collection.get(
+                ids=[note_id],
+                include=['embeddings', 'metadatas', 'documents']
+            )
+            
+            print(f"[VectorStore] 📊 Verification results:")
+            print(f"  IDs: {result['ids']}")
+            print(f"  Has embeddings: {'Yes' if result['embeddings'] is not None else 'No'}")
+            print(f"  Embedding length: {len(result['embeddings'][0]) if result['embeddings'] is not None else 0}")
+            
+            # Check if embeddings exist and are not empty
+            if len(result["ids"]) == 0:
+                raise ValueError(f"No embeddings found for note {note_id}")
+                
+            if len(result["embeddings"]) == 0:
+                raise ValueError(f"Empty embeddings list for note {note_id}")
+                
+            stored_embedding = result["embeddings"][0]
+            if stored_embedding is None:
+                raise ValueError(f"Stored embedding is None for note {note_id}")
+                
+            # Verify embedding length matches
+            if len(stored_embedding) != len(embedding):
+                raise ValueError(f"Stored embedding length ({len(stored_embedding)}) does not match generated embedding length ({len(embedding)})")
+                
+            print(f"[VectorStore] ✅ Successfully added note {note_id} with embedding")
+            
+        except Exception as e:
+            print(f"[VectorStore] ❌ Error adding note to collection: {str(e)}")
+            raise
 
     def update_note(
         self,
@@ -134,35 +199,46 @@ class VectorStoreClient:
             List of dictionaries containing similar notes and their metadata
         """
         # Get the note's embedding
-        result = self.collection.get(ids=[note_id])
-        if not result["ids"]:
-            raise ValueError(f"Note {note_id} not found in collection")
+        try:
+            result = self.collection.get(ids=[note_id], include=['embeddings'])
             
-        # Query similar notes
-        query_result = self.collection.query(
-            query_embeddings=[result["embeddings"][0]],
-            n_results=top_n + 1,  # +1 because the note itself will be in results
-            where={"file_path": {"$ne": note_id}} if exclude_ids is None else {
-                "file_path": {"$nin": exclude_ids + [note_id]}
-            }
-        )
-        
-        # Format results
-        similar_notes = []
-        for i, (id_, distance, metadata, content) in enumerate(zip(
-            query_result["ids"][0],
-            query_result["distances"][0],
-            query_result["metadatas"][0],
-            query_result["documents"][0]
-        )):
-            similar_notes.append({
-                "note_id": id_,
-                "similarity_score": 1 - distance,  # Convert distance to similarity
-                "metadata": metadata,
-                "content": content
-            })
+            if len(result["ids"]) == 0:
+                print(f"Note {note_id} not found in collection")
+                return []
+                
+            if len(result["embeddings"]) == 0:
+                print(f"No embeddings found for note {note_id}")
+                return []
+                
+            # Query similar notes
+            query_result = self.collection.query(
+                query_embeddings=[result["embeddings"][0]],
+                n_results=top_n + 1,  # +1 because the note itself will be in results
+                where={"file_path": {"$ne": note_id}} if exclude_ids is None else {
+                    "file_path": {"$nin": exclude_ids + [note_id]}
+                }
+            )
             
-        return similar_notes
+            # Format results
+            similar_notes = []
+            for i, (id_, distance, metadata, content) in enumerate(zip(
+                query_result["ids"][0],
+                query_result["distances"][0],
+                query_result["metadatas"][0],
+                query_result["documents"][0]
+            )):
+                similar_notes.append({
+                    "note_id": id_,
+                    "similarity_score": 1 - distance,  # Convert distance to similarity
+                    "metadata": metadata,
+                    "content": content
+                })
+            
+            return similar_notes
+            
+        except Exception as e:
+            print(f"Error in find_similar_notes: {str(e)}")
+            return []
 
     def get_note_metadata(self, note_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -190,7 +266,16 @@ class VectorStoreClient:
 
     def clear_embeddings(self) -> None:
         """Clear all stored embeddings."""
-        self.collection.delete(where={})
+        try:
+            # Get all IDs first
+            result = self.collection.get()
+            if result["ids"]:
+                # Delete using IDs
+                self.collection.delete(ids=result["ids"])
+            print("Successfully cleared all embeddings")
+        except Exception as e:
+            print(f"Error clearing embeddings: {str(e)}")
+            raise
 
     def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """

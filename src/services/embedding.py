@@ -4,10 +4,9 @@ Supports both local models via Sentence Transformers and OpenAI's embedding mode
 """
 
 import os
-import hashlib
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Any, Tuple
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
