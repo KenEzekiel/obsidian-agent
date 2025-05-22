@@ -1,7 +1,7 @@
 """
-VaultReader module for parsing and analyzing Obsidian vault content.
+VaultReader and VaultWriter modules for parsing and analyzing Obsidian vault content.
 
-This module provides functionality to read and parse Obsidian vault files,
+This module provides functionality to read, write and parse Obsidian vault files,
 extract wikilinks, and handle both regular links and attachments.
 """
 
@@ -139,6 +139,153 @@ class VaultReader:
             for note_path in self.get_all_notes()
         }
 
+
+class VaultWriter:
+    """
+    A class for writing to Obsidian vault files.
+    
+    This class provides methods to:
+    - Append content to existing notes
+    - Create new notes
+    - Modify note content
+    - Write wikilinks and tags in specific formats
+    """
+
+    def __init__(self, vault_path: Optional[Path] = None):
+        """
+        Initialize a VaultWriter instance.
+
+        Args:
+            vault_path: Path to the vault directory. If None, defaults to "../Mock Vault"
+        """
+        if vault_path is None:
+            vault_path = Path(__file__).parent.parent / "Mock Vault"
+        self.vault_path = vault_path
+
+    def write_suggestions(self, note_path: Path, links: List[Dict[str, float]], topics: List[str], categories: List[str]) -> None:
+        """
+        Write suggested links, topics, and categories to a note in a structured format.
+
+        Args:
+            note_path: Path to the note file
+            links: List of dictionaries with 'target' and 'score' keys
+            topics: List of topic strings to write as #tag-topic
+            categories: List of category strings to write as #cat-category
+        """
+        if not note_path.exists():
+            raise FileNotFoundError(f"Note does not exist: {note_path}")
+
+        try:
+            content = self.read_note(note_path)
+            
+            # Build suggestions section
+            suggestions_section = "\n\n## Agent Suggestions\n{\n"
+            
+            # Add links subsection with wikilinks
+            suggestions_section += '  "suggested_links": [\n'
+            for link in links:
+                target = link["target"]
+                # Convert absolute path to relative path
+                if target.startswith(str(self.vault_path)):
+                    target = target[len(str(self.vault_path)) + 1:]  # +1 to remove the leading slash
+                # Remove .md extension
+                if target.endswith('.md'):
+                    target = target[:-3]
+                suggestions_section += f'    {{\n      "link": "[[{target}]]",\n      "score": {link["score"]:.2f}\n    }},\n'
+            suggestions_section = suggestions_section.rstrip(',\n') + '\n  ],\n'
+            
+            # Add topics subsection with #tag- format
+            suggestions_section += '  "topics": [\n'
+            for topic in topics:
+                # Convert to lowercase and replace spaces with hyphens
+                formatted_topic = topic.lower().replace(' ', '-')
+                suggestions_section += f'    " #tag-{formatted_topic} ",\n'
+            suggestions_section = suggestions_section.rstrip(',\n') + '\n  ],\n'
+            
+            # Add categories subsection with #cat- format
+            suggestions_section += '  "categories": [\n'
+            for category in categories:
+                # Convert to lowercase and replace spaces with hyphens
+                formatted_category = category.lower().replace(' ', '-')
+                suggestions_section += f'    " #cat-{formatted_category} ",\n'
+            suggestions_section = suggestions_section.rstrip(',\n') + '\n  ]\n'
+            
+            suggestions_section += "}\n"
+            
+            # Check if section already exists and replace if it does
+            if "## Agent Suggestions" in content:
+                start = content.find("## Agent Suggestions")
+                end = content.find("}\n", start) + 2  # Changed to find the end of the JSON object
+                content = content[:start] + suggestions_section.lstrip() + content[end:]
+            else:
+                content += suggestions_section
+                
+            # Write back to file
+            with open(note_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+        except Exception as e:
+            raise Exception(f"Failed to write suggestions to {note_path}: {str(e)}")
+
+    def read_note(self, note_path: Path) -> str:
+        """Read the contents of a note file."""
+        with open(note_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    def append_to_note(self, note_path: Path, content: str, add_newline: bool = True) -> None:
+        """
+        Append content to an existing note.
+
+        Args:
+            note_path: Path to the note file
+            content: Content to append
+            add_newline: Whether to add a newline before the content
+
+        Raises:
+            FileNotFoundError: If the note doesn't exist
+            UnicodeDecodeError: If the file encoding is not UTF-8
+        """
+        if not note_path.exists():
+            raise FileNotFoundError(f"Note does not exist: {note_path}")
+
+        try:
+            with open(note_path, 'a', encoding='utf-8') as f:
+                if add_newline:
+                    f.write('\n')
+                f.write(content)
+        except UnicodeDecodeError as e:
+            raise UnicodeDecodeError(f"Failed to write to {note_path}: {str(e)}")
+
+    def append_wikilinks(self, note_path: Path, links: List[Dict[str, str]], add_newline_between: bool = True) -> None:
+        """
+        Append multiple wikilinks to an existing note.
+
+        Args:
+            note_path: Path to the note file
+            links: List of dictionaries, each containing:
+                  - 'link': Text of the link (what the link points to)
+                  - 'display': Optional display text for the link (can be None)
+            add_newline_between: Whether to add newlines between multiple links
+
+        Raises:
+            FileNotFoundError: If the note doesn't exist
+            UnicodeDecodeError: If the file encoding is not UTF-8
+        """
+        formatted_links = []
+        for link_info in links:
+            link_text = link_info['link']
+            display_text = link_info.get('display')
+            
+            if display_text:
+                wikilink = f"[[{link_text}|{display_text}]]"
+            else:
+                wikilink = f"[[{link_text}]]"
+            formatted_links.append(wikilink)
+            
+        separator = '\n' if add_newline_between else ' '
+        combined_links = separator.join(formatted_links)
+        
+        self.append_to_note(note_path, combined_links)
 
 if __name__ == "__main__":
     # Example usage
