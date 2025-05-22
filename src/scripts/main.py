@@ -263,11 +263,12 @@ def main():
         raise
 
 def run_langgraph_agent():
+    """Run the LangGraph agent on a vault."""
     # Initialize services
     agent = LangGraphAgentSystem()
 
     # Process vault
-    vault_path = "./Mock Vault"  # Update this path as needed
+    vault_path = "/Users/kenneth.ezekiel.suprantoni/Documents/Github/obsidian-agent/Mock Vault" 
     results = agent.process_vault(vault_path)
 
     # Convert results to JSON-serializable format
