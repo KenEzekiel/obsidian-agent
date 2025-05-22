@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from rich.console import Console
 from rich.progress import Progress
+from datetime import datetime
 
-from core.vault import VaultReader
-from core.graph import GraphBuilder
-from services.embedding import EmbeddingService
-from services.vectorstore import VectorStoreClient
+from src.core.vault import VaultReader
+from src.core.graph import GraphBuilder
+from src.services.embedding import EmbeddingService
+from src.services.vectorstore import VectorStoreClient
+from src.agents.implementations.langgraph_agent import LangGraphAgentSystem
 
 console = Console()
 
@@ -111,7 +113,7 @@ def process_with_embeddings(
                 for note in batch
             ]
             
-            # Add notes to similarity service
+            # Add notes to vector store
             for note, text in zip(batch, batch_texts):
                 vector_store_client.add_note(
                     note_id=note,
@@ -185,6 +187,21 @@ def main():
         analyzer = ObsidianAnalyzer(args.vault_path)
         vault_data = analyzer.analyze()
         
+        # Clear existing embeddings before processing
+        console.print("[bold blue]Clearing existing embeddings...[/]")
+        embedding_service = EmbeddingService(
+            model_type=args.model_type,
+            model_name=args.model_name,
+            batch_size=args.batch_size
+        )
+        vector_store = VectorStoreClient(
+            embedding_service=embedding_service,
+            collection_name="embeddings",
+            persist_directory=Path("./data/embeddings")
+        )
+        vector_store.clear_embeddings()
+        console.print("[bold green]Embeddings cleared successfully[/]")
+        
         # Generate embeddings
         process_with_embeddings(
             vault_data,
@@ -195,9 +212,88 @@ def main():
         )
         
         analyzer.graph_builder.write_graph()
+        
+        # Test embeddings with a sample note
+        console.print("\n[bold blue]Testing embeddings with sample note...[/]")
+        
+        # Initialize embedding service and vector store
+        embedding_service = EmbeddingService(
+            model_type=args.model_type,
+            model_name=args.model_name,
+            batch_size=args.batch_size
+        )
+        vector_store = VectorStoreClient(
+            embedding_service=embedding_service,
+            collection_name="embeddings",
+            persist_directory=Path("./data/embeddings")
+        )
+        
+        # Get first note from vault data for testing
+        test_note_path = "/Users/kenneth.ezekiel.suprantoni/Documents/Github/obsidian-agent/Mock Vault/05 - Ilmu/08.2 - Kriptografi/01.1 - Pengenalan Kriptografi.md"
+        test_note_content = vault_data[test_note_path]["content"]
+        
+        # Get embeddings for test note
+        test_note_embeddings = vector_store.collection.get(
+            ids=[test_note_path],
+            include=['embeddings']
+        )
+        if len(test_note_embeddings["embeddings"]) > 0:
+            console.print(f"[green]Found embeddings of length: {len(test_note_embeddings['embeddings'][0])}[/] for note: {test_note_path}")
+        else:
+            console.print("[red]No embeddings found for test note[/]")
+        
+        console.print(f"[cyan]Testing with note:[/] {test_note_path}")
+        console.print("[cyan]Finding similar notes...[/]")
+        
+        similar_notes = vector_store.find_similar_notes(
+            note_id=test_note_path,
+            top_n=3
+        )
+        
+        if similar_notes:
+            console.print("\n[green]Similar notes found:[/]")
+            for note in similar_notes:
+                console.print(f"\n[yellow]Note ID:[/] {note['note_id']}")
+                console.print(f"[yellow]Similarity Score:[/] {note['similarity_score']:.3f}")
+                console.print(f"[yellow]Preview:[/]\n{note['content'][:200]}...")
+        else:
+            console.print("\n[red]No similar notes found[/]")
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}[/]")
         raise
+
+def run_langgraph_agent():
+    # Initialize services
+    agent = LangGraphAgentSystem()
+
+    # Process vault
+    vault_path = "./Mock Vault"  # Update this path as needed
+    results = agent.process_vault(vault_path)
+
+    # Convert results to JSON-serializable format
+    output = []
+    for state in results:
+        state_dict = state.model_dump()
+        
+        # Convert datetime objects to strings
+        for link in state_dict["suggested_links"]:
+            link["created_at"] = link["created_at"].isoformat()
+            
+        output.append(state_dict)
+
+    # Create output directory if it doesn't exist
+    output_dir = Path("./data")
+    output_dir.mkdir(exist_ok=True)
+
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = output_dir / f"agent_results_{timestamp}.json"
+
+    # Write results to file
+    with open(output_file, "w") as f:
+        json.dump(output, f, indent=2)
+
+    print(f"Results written to {output_file}")
 
 if __name__ == "__main__":
     main()
