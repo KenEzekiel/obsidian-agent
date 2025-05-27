@@ -7,12 +7,10 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich import print as rprint
 
-from src.agents.base import AgentSystem, AgentState, NoteLink, SimilarNote, VectorSimilarityTool, console
+from src.agents.base import AgentSystem, AgentState, VectorSimilarityTool, console
 from src.services.vectorstore import VectorStoreClient
 from src.services.embedding import EmbeddingService
 from src.core.vault import VaultReader, VaultWriter

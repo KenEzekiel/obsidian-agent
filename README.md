@@ -50,3 +50,14 @@ obsidian-agent/
 ├── requirements.txt          # Project dependencies
 └── README.md                
 ```
+
+
+Works by having a tool for similarity search, so it doesn't have to check pair-by-pair for links. Cons are it can miss some links, but much more efficient this way.
+
+Improvement in langgraph --> pair analysis, and then critique then decide, tool call juga di langgraph
+
+Improvement --> use note categories too
+
+Improvement --> Analyzer for evaluator
+
+Essentially the vault is like a simple MCP
