@@ -8,6 +8,7 @@ A tool for analyzing your Obsidian vault structure and generating graph represen
 - **Graph Building**: Generate a graph representation of note connections
 - **Attachment Support**: Optionally include attachment links in the analysis
 - **Configurable**: Flexible options for analysis and output
+- **Multiple Agent Frameworks**: Choose from LangGraph (default), LangGraph Agentic, AutoGen, or Pydantic implementations
 
 ## Installation
 
@@ -17,24 +18,35 @@ git clone https://github.com/KenEzekiel/obsidian-agent.git
 cd obsidian-agent
 ```
 
-2. Create a virtual environment and activate it:
+2. Install Poetry (if not already installed):
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install poetry
 ```
 
 3. Install dependencies:
 ```bash
-pip install -r requirements.txt
+poetry install
 ```
 
 ## Usage
 
-Run the analyzer with your Obsidian vault:
+Run the analyzer with your Obsidian vault (LangGraph agent is default):
 
 ```bash
-python src/main.py /path/to/your/vault
+poetry run obsidian-agent /path/to/your/vault
 ```
+
+To select a different agent implementation:
+
+```bash
+poetry run obsidian-agent /path/to/your/vault --agent autogen
+```
+
+Supported agents: `langgraph` (default), `langgraph-agentic`, `autogen`, `pydantic`
+
+## Configuration
+
+You can configure the agent via CLI arguments, environment variables, or a YAML config file. See `src/config/agent_config.py` for details.
 
 ## Project Structure
 
@@ -46,18 +58,29 @@ obsidian-agent/
 │   │   └── graph_builder.py   # Graph building and analysis
 │   ├── services/
 │   │   └── embedding_service.py    # Embedding conversion and storage
+│   ├── agents/
+│   ├── config/
+│   ├── scripts/
 │   └── main.py               # Main entry point
 ├── requirements.txt          # Project dependencies
-└── README.md                
+├── README.md                
+├── pyproject.toml
+└── ...
 ```
 
+## Contributing
+
+See `CONTRIBUTING.md` for guidelines on contributing, code style, and running tests.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.
 
 Works by having a tool for similarity search, so it doesn't have to check pair-by-pair for links. Cons are it can miss some links, but much more efficient this way.
 
-Improvement in langgraph --> pair analysis, and then critique then decide, tool call juga di langgraph
+## Future Improvements
 
-Improvement --> use note categories too
-
-Improvement --> Analyzer for evaluator
-
-Essentially the vault is like a simple MCP
+- Enhance LangGraph implementation with pair-wise note analysis, followed by critique and decision-making phases
+- Integrate note categories into the analysis pipeline for better context understanding
+- Develop an analyzer component for the evaluator to improve assessment accuracy
+- Treat the vault as a simple Multi-Agent Conversation Protocol (MCP) system

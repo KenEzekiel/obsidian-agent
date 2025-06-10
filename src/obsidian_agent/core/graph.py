@@ -5,10 +5,10 @@ This module provides functionality to build and serialize graph structures
 representing the connections between notes in an Obsidian vault.
 """
 
-import os
 import json
+import re
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 
 
 class GraphBuilder:
@@ -25,6 +25,8 @@ class GraphBuilder:
     def __init__(self):
         """Initialize an empty graph structure."""
         self.graph: Dict[str, Dict[str, Any]] = {}
+        self._tag_pattern = re.compile(r'#tag-([^\s]+)')
+        self._category_pattern = re.compile(r'#cat-([^\s]+)')
 
     def add_note(self, file_path: str, content: str, links: List[str]) -> None:
         """
@@ -35,9 +37,15 @@ class GraphBuilder:
             content: Content of the note
             links: List of links in the note
         """
+        # Extract tags and categories from content
+        tags = self._tag_pattern.findall(content)
+        categories = self._category_pattern.findall(content)
+        
         self.graph[file_path] = {
             "content": content,
-            "links": list(links)
+            "links": list(links),
+            "tags": list(tags),
+            "categories": list(categories)
         }
 
     def build_graph(self, vault_data: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -64,6 +72,22 @@ class GraphBuilder:
         """
         return self.graph
     
+    def get_lightweight_graph(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get a lightweight version of the graph without content.
+
+        Returns:
+            Dictionary mapping file paths to their metadata (links, tags, categories)
+        """
+        return {
+            file_path: {
+                "links": data["links"],
+                "tags": data["tags"],
+                "categories": data["categories"]
+            }
+            for file_path, data in self.graph.items()
+        }
+    
     def write_graph(self, output_dir: Optional[Path] = None) -> None:
         """
         Write the graph structure to a JSON file.
@@ -80,7 +104,29 @@ class GraphBuilder:
             output_dir = Path(__file__).parent.parent.parent / 'data'
         output_dir.mkdir(exist_ok=True, parents=True)
 
-        # Write graph to JSON file
+        # Write full graph to JSON file
         graph_file = output_dir / 'graph.json'
         with open(graph_file, 'w', encoding='utf-8') as f:
             json.dump(self.graph, f, indent=2, ensure_ascii=False)
+            
+        # Write lightweight graph to JSON file
+        lightweight_file = output_dir / 'graph_lightweight.json'
+        with open(lightweight_file, 'w', encoding='utf-8') as f:
+            json.dump(self.get_lightweight_graph(), f, indent=2, ensure_ascii=False)
+    
+    def get_graph_as_dict(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get the graph in a dictionary format suitable for external use.
+        This method provides a clean interface for other modules to access the graph data.
+
+        Returns:
+            Dictionary containing both full and lightweight graph data:
+            {
+                "full": {file_path: {content, links, tags, categories}},
+                "lightweight": {file_path: {links, tags, categories}}
+            }
+        """
+        return {
+            "full": self.graph,
+            "lightweight": self.get_lightweight_graph()
+        }
