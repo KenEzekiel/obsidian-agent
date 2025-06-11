@@ -2,6 +2,11 @@
 
 A tool for analyzing your Obsidian vault structure and generating graph representations of note connections.
 
+![Before](public/before.png)
+![After](public/after-lg-1-setting.png)
+
+![Demo](public/obsidian-lg.gif)
+
 ## Features
 
 - **Vault Analysis**: Extract wikilinks and connections from your Obsidian vault
